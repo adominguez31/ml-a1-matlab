@@ -1,22 +1,23 @@
 % decision_tree.m assumes that the first column contains the classes
 
-clear 
+clear
+close all
 
 disp('Importing data for analysis...');
 A = importdata('letter-recognition.data');
-[numrows,numcols] = size(A.data);
+[numrows,~] = size(A.data);
 
 split_res = .1;    % resolution of cross-validation data
 range_max = floor(1/split_res);
 trainspace = linspace(floor(split_res*numrows),numrows,range_max);
 trainspace(end) = [];
 
-[m,n] = size(trainspace);
+[~,n] = size(trainspace);
 test_err = zeros(n,2);
 train_err = zeros(n,2);
 avg_err = zeros(n,2);
 idx = 1;
-rng(42);    % set random seed
+rng(42);    % random seed
 
 disp('Computing cross validation error...');
 for i = trainspace
@@ -38,31 +39,61 @@ for i = trainspace
     % use best classifier on test data
     test_err(idx,1) = loss(stree.Trained{smidx},test_data,test_class);
     
-%     % 10-fold cv tree
-%     tree = fitctree(train_data,train_class);
-%     cvtree = crossval(tree,'kfold',10); % 10-fold cross validation
-%     L = kfoldLoss(cvtree,'mode','individual'); % calculate training error
-%     avg_err(idx,2) = mean(L); % average training error
-%     [train_err(idx,2),midx] = min(L); % index of best classifier model
-%     
-%     % use best classifier on test data
-%     test_err(idx,2) = loss(cvtree.Trained{midx},test_data,test_class);
-    
     idx = idx+1;
 end
 
-figure(1) % learning curves
+figure % learning curves
 plot(100*split_res*(1:size(train_err,1)),train_err(:,1),'-r',...
     100*split_res*(1:size(avg_err,1)),avg_err(:,1),'-b',...
     100*split_res*(1:size(test_err,1)),test_err(:,1),'-g');
 title('classification tree learning curves')
 xlabel('training data (%)')
 ylabel('error')
-legend('train (min)','train (avg)','test','location','best')
+legend('training (min)','training (avg)','test','location','best')
 
-figure(2) % confusion matrix
-[labels,scores] = kfoldPredict(stree);
+figure % confusion matrix
+[labels,~] = kfoldPredict(stree);
 cmat = confusionmat(stree.Y,labels);
 heatmap(cmat,stree.Y,stree.Y,1,'Colormap','red','ShowAllTicks',true,...
-    'UseLogColorMap',true,'Colorbar',true,'Gridlines',':')
+    'UseLogColorMap',true,'Colorbar',true,'Gridlines',':');
 
+    train_data = A.data(1:16000,:);
+    train_class = A.textdata(2:16000+1,1);
+    test_data = A.data(16000+1:end,:);
+    test_class = A.textdata(16000+2:end,1);
+
+% tree depth vs performance
+c = cvpartition(train_class,'kfold',10); % stratified cv folds
+stree = fitctree(train_data,train_class,'cvpartition',c);
+num_nodes = zeros(stree.KFold,1);
+
+for i = 1:stree.KFold
+    [m,~] = size(stree.Trained{1}.IsBranchNode);
+    num_nodes(i,1) = sum(m-stree.Trained{i}.IsBranchNode);% num branch nodes
+end
+avg_nodes = mean(num_nodes); % average number of splits
+
+trainspace = linspace(floor(split_res*avg_nodes),avg_nodes,range_max);
+trainspace(end) = [];
+idx = 1;
+for i = trainspace
+    c = cvpartition(train_class,'kfold',10); % stratified cv folds
+    stree = fitctree(train_data,train_class,'cvpartition',c,...
+        'MinLeafSize',i);
+    L = kfoldLoss(stree,'mode','individual'); % calculate training error
+    avg_err(idx,1) = mean(L); % average training error
+    [train_err(idx,1),smidx] = min(L); % index of best classifier model
+
+    % use best classifier on test data
+    test_err(idx,1) = loss(stree.Trained{smidx},test_data,test_class);
+    
+    idx = idx+1;
+end
+
+figure % learning curves
+plot(trainspace,train_err(:,1),'-r',trainspace,avg_err(:,1),'-b',...
+    trainspace,test_err(:,1),'-g');
+title('classification tree learning curves')
+xlabel('tree depth (branching nodes)')
+ylabel('error')
+legend('training (min)','training (avg)','test','location','best')
